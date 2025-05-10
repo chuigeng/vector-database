@@ -11,8 +11,10 @@ TEXT_FIELD_NAME = "original_text" # 存储原始文本，方便查看结果
 EMBEDDING_FIELD_NAME = "embedding"
 
 # Sentence Transformers 模型
-MODEL_NAME = 'all-MiniLM-L6-v2' # 这是一个常用且效果不错的模型 (维度 384)
+# MODEL_NAME = 'all-MiniLM-L6-v2' # 这是一个常用且效果不错的模型 (维度 384)
 # MODEL_NAME = 'paraphrase-multilingual-MiniLM-L12-v2' # 多语言模型 (维度 384)
+MODEL_NAME = 'BAAI/bge-large-zh-v1.5' # 中文特训模型
+DEVICE = 'cpu' # Specify the device to use, e.g., 'cpu' or 'cuda:0'
 
 # --- 1. 连接 Milvus ---
 client = None
@@ -28,7 +30,7 @@ except Exception as e:
 print(f"正在加载 Sentence Transformers 模型: {MODEL_NAME}...")
 model = model.dense.SentenceTransformerEmbeddingFunction(
     model_name=MODEL_NAME, # Specify the model name
-    device='cpu' # Specify the device to use, e.g., 'cpu' or 'cuda:0'
+    device=DEVICE
 )
 EMBEDDING_DIM = model.dim
 print(f"模型加载完毕。嵌入维度 (dim): {EMBEDDING_DIM}")
@@ -85,17 +87,17 @@ except Exception as e:
 # --- 5. 准备并插入数据 ---
 print("准备数据并生成嵌入...")
 sentences_to_insert = [
-    "The quick brown fox jumps over the lazy dog.",
-    "Artificial intelligence is rapidly changing the world.",
-    "Milvus is a vector database for AI applications.",
-    "Sentence Transformers provide easy-to-use text embeddings.",
-    "Today is a sunny day, perfect for a walk in the park.",
-    "What are the best practices for vector similarity search?",
-    "Natural language processing enables computers to understand human language."
+    "敏捷的棕色狐狸跳过了懒惰的狗。",
+    "人工智能正在迅速改变世界。",
+    "Milvus 是一个用于 AI 应用的向量数据库。",
+    "Sentence Transformers 提供了易于使用的文本嵌入。",
+    "今天是个阳光明媚的日子，非常适合去公园散步。",
+    "向量相似度搜索的最佳实践是什么？",
+    "自然语言处理使计算机能够理解人类语言。"
 ]
 
 # 使用 Sentence Transformers 模型生成嵌入
-embeddings = model.encode_documents(sentences_to_insert, show_progress_bar=True)
+embeddings = model.encode_documents(sentences_to_insert)
 # embeddings 是一个 numpy 数组，每一行是一个句子的嵌入
 
 # 准备插入 Milvus 的数据
@@ -118,6 +120,12 @@ try:
     )
     print(f"数据插入成功!")
     print(f"成功插入 {len(data_to_insert_milvus)} 条实体。")
+
+    # 刷新数据，使其可被搜索和查询
+    # 在 Milvus 中，插入的数据首先进入内存缓冲区，flush 操作将其持久化并使其可查询
+    print("\nFlushing data...")
+    client.flush(collection_name=COLLECTION_NAME)
+    print("Flush complete.")
     
     # 获取集合实体数量
     stats = client.get_collection_stats(collection_name=COLLECTION_NAME)
@@ -145,17 +153,24 @@ index_params = {
 
 try:
     print(f"正在为字段 '{EMBEDDING_FIELD_NAME}' 创建索引...")
+    index_params = client.prepare_index_params()
+    index_params.add_index(
+        field_name=EMBEDDING_FIELD_NAME,
+        index_type="HNSW",
+        metric_type=INDEX_METRIC_TYPE,
+        params={"M": 16, "efConstruction": 200},
+        index_name="sentence_transformer_demo_index"
+    )
     client.create_index(
         collection_name=COLLECTION_NAME,
-        field_name=EMBEDDING_FIELD_NAME,
         index_params=index_params
     )
     print("索引创建完成!")
     # 打印索引信息
     print("\n当前集合的索引信息:")
-    indexes = client.describe_index(collection_name=COLLECTION_NAME)
+    indexes = client.describe_index(collection_name=COLLECTION_NAME, index_name="sentence_transformer_demo_index")
     for index in indexes:
-        print(f"  字段: {index['field_name']}, 索引类型: {index['index_type']}, 参数: {index['params']}")
+        print(f"  字段: {index}: {indexes.get(index)}")
 
 except Exception as e:
     print(f"索引创建失败: {e}")
@@ -166,6 +181,7 @@ except Exception as e:
 try:
     print("正在加载集合到内存...")
     client.load_collection(collection_name=COLLECTION_NAME)
+    time.sleep(2)
     print("集合加载完成!")
 except Exception as e:
     print(f"集合加载失败: {e}")
@@ -173,7 +189,7 @@ except Exception as e:
 
 
 # --- 8. 执行向量相似度搜索 ---
-query_sentence = "What is a vector DB?"
+query_sentence = "什么是向量数据库?"
 print(f"\n准备查询: \"{query_sentence}\"")
 
 # 1. 将查询语句转换为向量
@@ -181,12 +197,6 @@ query_embedding = model.encode_queries([query_sentence])[0].tolist() # model.enc
 
 # 2. 定义搜索参数
 TOP_K = 3 # 返回最相似的 top_k 个结果
-SEARCH_PARAMS_HNSW = {
-    "metric_type": INDEX_METRIC_TYPE, # 必须与索引创建时一致或兼容
-    "params": {
-        "ef": 128  # HNSW 搜索时的探索范围，ef >= top_k，通常比 top_k 大很多
-    }
-}
 
 print(f"正在执行搜索 (Top K={TOP_K})...")
 try:
@@ -194,7 +204,7 @@ try:
         collection_name=COLLECTION_NAME,
         data=[query_embedding],             # 查询向量，可以批量查询，所以是列表
         anns_field=EMBEDDING_FIELD_NAME,    # 要搜索的向量字段名
-        param=SEARCH_PARAMS_HNSW,           # 搜索参数，对应索引类型
+        params={"ef": 128},                  # HNSW 搜索时的探索范围，ef >= top_k，通常比 top_k 大很多           
         limit=TOP_K,                        # 返回结果数量
         output_fields=[TEXT_FIELD_NAME]     # 希望返回的字段，除了距离和主键ID
     )
@@ -207,10 +217,7 @@ try:
         for i, hits in enumerate(search_results):
             print(f"  查询 {i+1} 的结果:")
             for hit in hits:
-                doc_id = hit["id"]
-                score = hit["score"]
-                original_text = hit.get(TEXT_FIELD_NAME, "N/A")
-                print(f"    - ID: {doc_id}, 距离(Distance/Score): {score:.4f}, 文本: \"{original_text}\"")
+                print(f"    - hit: {hit}")
 
 except Exception as e:
     print(f"搜索失败: {e}")
