@@ -1,1 +1,3 @@
 venv
+src/face/__pycache__/
+src/face/image/
