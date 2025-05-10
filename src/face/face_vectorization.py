@@ -35,7 +35,7 @@ IMAGE_FIELD_NAME = "image_data"
 EMBEDDING_DIM = 128
 
 class FaceVectorizer:
-    def __init__(self, image_dir="src/face/image"):
+    def __init__(self, image_dir="image"):
         """
         初始化人脸向量化器
         

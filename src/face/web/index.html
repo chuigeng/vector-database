@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>人脸向量可视化</title>
+
+    <!-- 添加CSS -->
+    <link rel="stylesheet" href="static/style.css" />
+
+    <!-- D3.js库 -->
+    <script src="static/d3.v7.min.js"></script>
+
+    <!-- 可选: 增加一些基本库 -->
+    <script src="static/lodash.min.js"></script>
+  </head>
+  <body>
+    <main>
+      <div id="graph-container"></div>
+
+      <div id="vector-info" class="hidden">
+        <h3>向量数据</h3>
+        <div class="vector-data"></div>
+      </div>
+
+      <div id="controls">
+        <div class="slider-container">
+          <label for="similarity-threshold"
+            >相似度阈值: <span id="threshold-value">0.7</span></label
+          >
+          <input type="range" id="similarity-threshold" min="0" max="1" step="0.05" value="0.7" />
+        </div>
+        <button id="reset-zoom">重置视图</button>
+      </div>
+    </main>
+
+    <!-- 自定义JS -->
+    <script src="static/graph.js"></script>
+  </body>
+</html>
